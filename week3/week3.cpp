@@ -1,71 +1,106 @@
 #include<chess.hpp>
+#include<unordered_map>
+#include<iostream>
+#include<string>
 using namespace chess;
 
 const int INF = 1e9;
 
+const int MATE_SCORE = 2000000;
+
+int pieceValue(PieceType pt)
+{
+    switch (pt.internal())
+    {
+    case PieceType::PAWN:
+        return 100;
+    case PieceType::KNIGHT:
+        return 300;
+    case PieceType::BISHOP:
+        return 300;
+    case PieceType::ROOK:
+        return 500;
+    case PieceType::QUEEN:
+        return 1000;
+    default:
+        return 0;
+    }
+}
+
+
 int evaluate(Board &board){
-    // A simple evaluation function that counts material
     int score = 0;
     for(int i=0; i<64; i++){
         Piece piece = board.at(Square(i));
-        int pieceValue = 0;
-        if(piece == Piece::WHITEPAWN) pieceValue = 100;
-        else if(piece == Piece::WHITEKNIGHT) pieceValue = 320;
-        else if(piece == Piece::WHITEBISHOP) pieceValue = 320;
-        else if(piece == Piece::WHITEROOK) pieceValue = 500;
-        else if(piece == Piece::WHITEQUEEN) pieceValue = 900;
-        else if(piece == Piece::WHITEKING) pieceValue = 20000;
-        else if(piece == Piece::BLACKPAWN) pieceValue = -100;
-        else if(piece == Piece::BLACKKNIGHT) pieceValue = -320;
-        else if(piece == Piece::BLACKBISHOP) pieceValue = -320;
-        else if(piece == Piece::BLACKROOK) pieceValue = -500;
-        else if(piece == Piece::BLACKQUEEN) pieceValue = -900;
-        else if(piece == Piece::BLACKKING) pieceValue = -20000;
-        else pieceValue = 0;
-        score += pieceValue;
+        score += pieceValue(piece.type().internal()) * (piece.color() == Color::WHITE ? 1 : -1);
     }
     return score;
 }
 
-std::pair<int, Move> minimax(Board &board, int depth, bool maximizing){
+void orderMoves(Movelist &moves, Board &board){
+    for(auto &move : moves){
+        int score = 0;
+        if(board.isCapture(move)){
+            Piece victim = board.at(move.to());
+            Piece attacker = board.at(move.from());
+            score = 10 * pieceValue(victim.type()) - pieceValue(attacker.type());
+        }
+        move.setScore(score);
+    }
+    std::sort(moves.begin(), moves.end(), [](const Move &a, const Move &b){
+        return a.score() > b.score();
+    });
+}
+
+std::pair<int, Move> minimax(Board &board, int depth, int ply, int alpha, int beta, bool maximizing){
     Movelist moves;
     movegen::legalmoves(moves, board);
+
+    orderMoves(moves, board);
 
     if(moves.empty()){
         if(board.inCheck()){
             if(maximizing)
-                return {-INF, Move()};
+                return {-MATE_SCORE + ply, Move::NULL_MOVE};
             else
-                return {INF, Move()};
+                return {MATE_SCORE - ply, Move::NULL_MOVE};
         }
-        return {0, Move()};
+        return {0, Move::NULL_MOVE};
     }
 
     if(depth == 0){
-        return {evaluate(board), Move()};
+        return {evaluate(board), Move::NULL_MOVE};
     }
     if(maximizing){
-        std::pair<int, Move> best = {-INF, Move()};
+        std::pair<int, Move> best = {-INF, Move::NULL_MOVE};
         for(auto &move:moves){
             board.makeMove(move);
-            std::pair<int, Move> result = minimax(board, depth-1, false);
+            std::pair<int, Move> result = minimax(board, depth-1, ply+1, alpha, beta, false);
             board.unmakeMove(move);
             if(result.first >= best.first){
                 best.first = result.first;
                 best.second = move;
             }
+            alpha = std::max(alpha, best.first);
+            if(beta <= alpha){
+                break;
+            }
         }
         return best;
     }
     else{
-        std::pair<int, Move> best = {INF, Move()};
+        std::pair<int, Move> best = {INF, Move::NULL_MOVE};
         for(auto &move:moves){
             board.makeMove(move);
-            std::pair<int, Move> result = minimax(board, depth-1, true);
+            std::pair<int, Move> result = minimax(board, depth-1, ply+1, alpha, beta, true);
             board.unmakeMove(move);
             if(result.first <= best.first){
                 best.first = result.first;
                 best.second = move;
+            }
+            beta = std::min(beta, best.first);
+            if(beta <= alpha){
+                break;
             }
         }
         return best;
@@ -73,10 +108,15 @@ std::pair<int, Move> minimax(Board &board, int depth, bool maximizing){
 }
 
 int main(){
-    Board board("r1b3kr/ppp1Bp1p/1b6/n2P4/2p3q1/2Q2N2/P4PPP/RN2R1K1 w - - 1 0");
+    std::cout << "Enter FEN and mate in N: ";
+    std::string fen;
+    getline(std::cin, fen);
+    int mateInN;
+    std::cin >> mateInN;
+    Board board(fen);
     Movelist moves;
     movegen::legalmoves(moves, board);
     bool maximizing = board.sideToMove() == Color::WHITE;
-    std::pair<int, Move> result = minimax(board, 5, maximizing);
-    std::cout << uci::moveToUci(result.second) << std::endl;
+    std::pair<int, Move> result = minimax(board, 2 * mateInN - 1, 0, -INF, INF, maximizing);
+    std::cout << uci::moveToSan(board, result.second) << std::endl;
 }
